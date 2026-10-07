@@ -7,7 +7,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .config import get_settings
-from .db import Database
+from .db import Database, DatabaseUnavailable
+from .orders import router as orders_router
 
 log = logging.getLogger("order_api")
 
@@ -35,6 +36,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="order-api", lifespan=lifespan)
+app.include_router(orders_router)
+
+
+@app.exception_handler(DatabaseUnavailable)
+async def database_unavailable(request: Request, exc: DatabaseUnavailable) -> JSONResponse:
+    log.error("database unavailable", extra={"event": "db_unavailable", "error_type": str(exc)})
+    return JSONResponse({"detail": "database unavailable"}, status_code=503)
 
 
 @app.get("/healthz")
