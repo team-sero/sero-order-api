@@ -1,0 +1,23 @@
+# 로컬 개발용 Postgres. 앱은 venv에서 python -m app으로 실행한다.
+#   시작: docker compose up -d
+#   중지: docker compose down        (데이터까지 지우려면 down -v)
+services:
+  postgres:
+    # 18부터 이미지의 데이터 경로가 바뀌어서 아래 볼륨 경로가 안 맞는다. 17로 고정.
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: order
+      POSTGRES_PASSWORD: order
+      POSTGRES_DB: orders
+    ports:
+      - "5432:5432"  # PC에 Postgres가 이미 깔려 있으면 "15432:5432"로 바꾸고 DATABASE_URL 포트도 맞추기
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order -d orders"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

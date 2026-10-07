@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8080
 
+    # DB. 로컬 기본값은 compose.yaml과 맞춰 뒀다. 쿠버네티스에선 Secret으로 넣는다.
+    database_url: str = "postgresql://order:order@127.0.0.1:5432/orders"
+    db_pool_min: int = 1
+    db_pool_max: int = 10
+    db_timeout_seconds: float = 3.0  # 연결, 커넥션 대기, 쿼리 각각의 제한 시간
+
 
 @lru_cache
 def get_settings() -> Settings:
