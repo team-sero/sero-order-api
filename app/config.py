@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     db_pool_max: int = 10
     db_timeout_seconds: float = 3.0  # 연결, 커넥션 대기, 쿼리 각각의 제한 시간
 
+    # 결제사(payment-mock). 로컬 기본값은 payment-mock의 compose.yaml과 맞춰 뒀다.
+    payment_url: str = "http://127.0.0.1:8090"
+    # 연결, 응답 대기 각각의 제한 시간. 결제사 지연 3초(S12)가 504가 아니라 메모리 증가로 나타나게 3초보다 길게 둔다
+    payment_timeout_seconds: float = 5.0
+
 
 @lru_cache
 def get_settings() -> Settings:

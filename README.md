@@ -5,7 +5,8 @@
 ## 준비물
 
 * Python 3.11 이상 (팀 기준 3.13)
-* Docker Desktop (로컬 Postgres용)
+* Docker Desktop (로컬 Postgres와 결제사 payment-mock용)
+* 결제사 payment-mock: sero-payment-mock 저장소를 order-api 옆 폴더에 받아 두고, 그 폴더에서 `docker compose up -d --build`
 
 ## 로컬 실행
 
@@ -20,6 +21,7 @@ $env:APP_VERSION="1.4.2"; python -m app
 ```
 
 * `Activate.ps1`이 막히면 한 번만 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+* 결제사 payment-mock이 안 떠 있으면 주문 생성은 502(결제사 연결 불가)가 난다
 
 맥, 리눅스
 
@@ -43,7 +45,9 @@ APP_VERSION=1.4.2 python -m app
 
 ## API
 
-* `POST /orders`: 주문 생성. 201, 입력 오류 422, DB 문제 503
+* `POST /orders`: 주문 생성. 저장 전에 결제사를 부르고, 승인된 주문만 상태 `PAID`로 저장한다
+  * 201 결제 승인, 402 결제 거절, 422 입력 오류, 502 결제사 오류나 연결 불가, 503 DB 문제, 504 결제 시간 초과
+  * 402, 502, 504에는 주문을 저장하지 않는다
 * `GET /orders/{order_id}`: 주문 조회. 200, 없으면 404, DB 문제 503
 * `GET /healthz`: liveness. 프로세스가 응답하는지만 본다
 * `GET /readyz`: readiness. DB에 쿼리가 되면 200, 아니면 503
@@ -57,6 +61,8 @@ APP_VERSION=1.4.2 python -m app
 * `DB_TIMEOUT_SECONDS`: 기본 `3`
 * `LOG_LEVEL`, `HOST`, `PORT`: 기본 `INFO`, `0.0.0.0`, `8080`
 * `POD_NAME`: 로그의 `pod` 값. 없으면 `HOSTNAME`(쿠버네티스에서는 파드 이름), 둘 다 없으면 `local`
+* `PAYMENT_URL`: 기본 `http://127.0.0.1:8090` (payment-mock의 compose.yaml과 같음)
+* `PAYMENT_TIMEOUT_SECONDS`: 기본 `5`. 결제사 연결, 응답 대기 각각의 제한 시간
 
 ## 로그 형식
 
@@ -64,14 +70,16 @@ APP_VERSION=1.4.2 python -m app
 
 * 공통 필드: `ts`, `level`, `service`, `version`, `pod`, `logger`, `message`
 * 추가 필드: `event`, `order_id`, `user_id`, `error_type` (4단계부터 `method`, `path`, `status`, `duration_ms`, 5단계부터 `trace_id`, `span_id`)
-* 주요 `event`: `startup`, `shutdown`, `db_connect_retry`, `db_connected`, `db_unavailable`, `order_created`
+* 주요 `event`: `startup`, `shutdown`, `db_connect_retry`, `db_connected`, `db_unavailable`, `order_created`, `payment_declined`, `payment_failed`, `payment_timeout`, `order_save_failed`
+* 결제 오류 줄의 `error_type`: 결제사가 오류로 답하면 `PaymentProviderError`(메시지에 결제사 상태 코드), 닿지 않으면 원래 오류 이름(예: `ConnectionRefusedError`), 시간 초과면 `ReadTimeout` 같은 이름
+* `order_save_failed`: 결제는 승인됐는데 주문을 저장하지 못했을 때. 메시지에 `payment_id`가 있다
 * 정상 종료(SIGTERM)면 `event: shutdown` 줄이 남고, OOMKilled(SIGKILL)면 안 남는다
 
 ## 진행 단계
 
 1. 뼈대: 설정, JSON 로그, 헬스체크 (완료)
 2. 주문 API와 Postgres (완료)
-3. 결제 호출 (결제사는 sero-payment-mock 저장소)
+3. 결제 호출 (완료, 결제사는 sero-payment-mock 저장소)
 4. 요청 로그
 5. OTel
 6. 메모리 구조 (처리 중 주문 버퍼, 주문 캐시)
