@@ -10,6 +10,7 @@ from .config import get_settings
 from .db import Database, DatabaseUnavailable
 from .orders import router as orders_router
 from .payments import PaymentDeclined, PaymentFailed, Payments, PaymentTimeout
+from .request_log import RequestLogMiddleware
 
 log = logging.getLogger("order_api")
 
@@ -41,6 +42,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="order-api", lifespan=lifespan)
 app.include_router(orders_router)
+# 요청 로그(4단계). 남기는 기준은 request_log.py 머리
+app.add_middleware(RequestLogMiddleware)
 
 
 @app.exception_handler(DatabaseUnavailable)

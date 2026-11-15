@@ -69,9 +69,12 @@ GET_RESPONSES = {404: {"description": "없는 주문"}, 503: {"description": "DB
 
 
 @router.post("/orders", status_code=201, response_model=Order, responses=CREATE_RESPONSES)
-async def create_order(body: OrderCreate, db: DB, payments: PAY, response: Response) -> Order:
+async def create_order(body: OrderCreate, db: DB, payments: PAY, request: Request, response: Response) -> Order:
     # 주문번호는 저장 전에 만든다. 저장되지 않는 주문(결제 거절, 실패)도 로그로 추적하려는 것
     order_id = uuid4()
+    # 요청 로그(request_log.py)도 같은 order_id, user_id를 남긴다. 결제 실패 줄과 그 요청의 응답 줄을 이어 볼 수 있다
+    request.state.order_id = str(order_id)
+    request.state.user_id = body.user_id
     total_amount = sum(item.price * item.qty for item in body.items)
     items = [item.model_dump() for item in body.items]
 
