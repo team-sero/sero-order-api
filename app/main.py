@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .db import Database, DatabaseUnavailable
+from .order_cache import OrderCache
 from .orders import router as orders_router
 from .payments import PaymentDeclined, PaymentFailed, Payments, PaymentTimeout
 from .request_log import RequestLogMiddleware
@@ -27,6 +28,11 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     # 결제사 클라이언트는 앱이 떠 있는 동안 하나를 계속 쓴다(연결 재사용)
     app.state.payments = Payments(settings.payment_url, settings.payment_timeout_seconds)
+    # 6단계 메모리 구조. 크기는 config.py의 order_buffer_mib, order_cache_*
+    app.state.order_buffer_bytes = int(settings.order_buffer_mib * 1024 * 1024)
+    app.state.order_cache = OrderCache(
+        settings.order_cache_ttl_seconds, settings.order_cache_max, settings.order_cache_entry_kib * 1024
+    )
     # DB 연결은 뒤에서 기다린다. 앱은 바로 뜨고, 연결 전까지는 readiness만 503
     connect_task = asyncio.create_task(db.connect_forever())
     log.info("service started", extra={"event": "startup"})

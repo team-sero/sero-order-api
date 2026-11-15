@@ -2,6 +2,8 @@
 
 3단계: 주문을 저장하기 전에 결제사를 부르고, 결제가 승인된 주문만 저장한다 (상태 PAID, payment_id 기록).
 거절(402), 결제사 오류(502), 결제 시간 초과(504)면 저장하지 않는다. 이 응답은 main.py의 예외 처리기가 만든다.
+6단계: 주문 생성은 끝날 때까지 작업 메모리를 잡고(work_buffer.py), 만든 주문은 최근 주문 캐시에 넣는다(order_cache.py).
+조회는 캐시에 있으면 캐시에서 답한다.
 """
 import logging
 from datetime import datetime
@@ -12,7 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from .db import Database, DatabaseUnavailable
+from .order_cache import OrderCache
 from .payments import Payments
+from .work_buffer import work_buffer
 
 log = logging.getLogger("order_api.orders")
 router = APIRouter()
@@ -58,6 +62,13 @@ def get_payments(request: Request) -> Payments:
 
 PAY = Annotated[Payments, Depends(get_payments)]
 
+
+def get_cache(request: Request) -> OrderCache:
+    return request.app.state.order_cache
+
+
+CACHE = Annotated[OrderCache, Depends(get_cache)]
+
 # /docs에 실패 응답도 보이게 적어 둔다
 CREATE_RESPONSES = {
     402: {"description": "결제 거절"},
@@ -69,7 +80,18 @@ GET_RESPONSES = {404: {"description": "없는 주문"}, 503: {"description": "DB
 
 
 @router.post("/orders", status_code=201, response_model=Order, responses=CREATE_RESPONSES)
-async def create_order(body: OrderCreate, db: DB, payments: PAY, request: Request, response: Response) -> Order:
+async def create_order(
+    body: OrderCreate, db: DB, payments: PAY, cache: CACHE, request: Request, response: Response
+) -> Order:
+    # 작업 메모리는 결제를 기다리는 동안(0.8초쯤)에도 잡고 있다가, 주문이 끝나면(실패로 끝나도) 놓는다
+    with work_buffer(request.app.state.order_buffer_bytes):
+        order = await _create_order(body, db, payments, request)
+    cache.put(order.order_id, order)
+    response.headers["Location"] = f"/orders/{order.order_id}"
+    return order
+
+
+async def _create_order(body: OrderCreate, db: Database, payments: Payments, request: Request) -> Order:
     # 주문번호는 저장 전에 만든다. 저장되지 않는 주문(결제 거절, 실패)도 로그로 추적하려는 것
     order_id = uuid4()
     # 요청 로그(request_log.py)도 같은 order_id, user_id를 남긴다. 결제 실패 줄과 그 요청의 응답 줄을 이어 볼 수 있다
@@ -115,12 +137,14 @@ async def create_order(body: OrderCreate, db: DB, payments: PAY, request: Reques
         "order created",
         extra={"event": "order_created", "order_id": str(order_id), "user_id": body.user_id},
     )
-    response.headers["Location"] = f"/orders/{order_id}"
     return Order.model_validate(dict(row))
 
 
 @router.get("/orders/{order_id}", response_model=Order, responses=GET_RESPONSES)
-async def get_order(order_id: UUID, db: DB) -> Order:
+async def get_order(order_id: UUID, db: DB, cache: CACHE) -> Order:
+    cached = cache.get(order_id)
+    if cached is not None:
+        return cached
     async with db.connection() as conn:
         row = await conn.fetchrow(f"SELECT {ORDER_COLUMNS} FROM orders WHERE order_id = $1", order_id)
     if row is None:
